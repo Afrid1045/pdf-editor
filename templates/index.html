@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Editor</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+</head>
+<body>
+    <h2>Upload and Edit PDF</h2>
+    <input type="file" id="pdfUpload" accept="application/pdf">
+    <br><br>
+
+    <button id="removeLinks">Remove All Hyperlinks</button>
+    <a id="downloadLink" style="display: none;" download="cleaned.pdf">Download Edited PDF</a>
+
+    <div id="pdfContainer"></div>
+
+    <script>
+        let pdfDoc = null;
+        let pdfFile = null;
+        let pdfContainer = document.getElementById("pdfContainer");
+    
+        document.getElementById("pdfUpload").addEventListener("change", function (event) {
+            pdfFile = event.target.files[0];
+            if (pdfFile) {
+                let fileReader = new FileReader();
+                fileReader.onload = function () {
+                    let typedArray = new Uint8Array(this.result);
+                    pdfjsLib.getDocument(typedArray).promise.then(function (pdf) {
+                        pdfDoc = pdf;
+                        renderAllPages();
+                    });
+                };
+                fileReader.readAsArrayBuffer(pdfFile);
+            }
+        });
+    
+        function renderAllPages() {
+            pdfContainer.innerHTML = ""; // Clear previous pages
+    
+            for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+                pdfDoc.getPage(pageNum).then(function (page) {
+                    let canvas = document.createElement("canvas");
+                    let ctx = canvas.getContext("2d");
+                    let viewport = page.getViewport({ scale: 1.5 });
+    
+                    canvas.width = viewport.width;
+                    canvas.height = viewport.height;
+    
+                    pdfContainer.appendChild(canvas);
+    
+                    let renderContext = {
+                        canvasContext: ctx,
+                        viewport: viewport
+                    };
+                    page.render(renderContext).promise.then(() => {
+                        detectAndHighlightLinks(page, canvas, viewport);
+                    });
+                });
+            }
+        }
+    
+        function detectAndHighlightLinks(page, canvas, viewport) {
+            page.getAnnotations().then(function (annotations) {
+                let ctx = canvas.getContext("2d");
+                let foundLinks = false;
+    
+                annotations.forEach(annotation => {
+                    if (annotation.subtype === 'Link' && annotation.rect) {
+                        foundLinks = true;
+                        let [x1, y1, x2, y2] = annotation.rect;
+                        let scale = viewport.transform[0];
+    
+                        // Scale positions to match canvas size
+                        x1 *= scale;
+                        y1 *= scale;
+                        x2 *= scale;
+                        y2 *= scale;
+    
+                        // Draw red box around the hyperlink
+                        ctx.strokeStyle = "red";
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(x1, canvas.height - y2, x2 - x1, y2 - y1);
+                    }
+                });
+    
+                if (!foundLinks) {
+                    console.log("No hyperlinks found on this page.");
+                }
+            });
+        }
+    
+        document.getElementById("removeLinks").addEventListener("click", function () {
+            if (!pdfFile) {
+                alert("Please upload a PDF first.");
+                return;
+            }
+    
+            let formData = new FormData();
+            formData.append("pdf", pdfFile);
+    
+            fetch("/remove_links", {
+                method: "POST",
+                body: formData
+            })
+            .then(response => response.blob())
+            .then(blob => {
+                let url = window.URL.createObjectURL(blob);
+                let downloadLink = document.getElementById("downloadLink");
+                downloadLink.href = url;
+                downloadLink.style.display = "block";
+                downloadLink.innerText = "Download Edited PDF";
+            })
+            .catch(error => console.error("Error:", error));
+        });
+    </script>    
+</body>
+</html>
